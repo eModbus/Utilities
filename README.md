@@ -83,3 +83,41 @@ If the time is exceeded, a single click is assumed.
  ``uint32_t qSize();``
  
  Get the number of events currently held in queue.
+
+## TelnetLog
+A class to duplicate output to all connected Telnet clients (i.e. do logging over Telnet). 
+As ``TelnetLog`` is derived from ``Print``, all well-known print and write functions are supported.
+Instead of the notorious ``Serial.print()`` calls, ``TelnetLog`` functions may be used in the same manner.
+
+### Constructor
+``TelnetLog(uint16_t port, uint8_t maxClients);``
+
+``port`` usually will be 23 for Telnet, but may be chosen freely.
+``maxClients`` sets the maximum number of concurrent client connections accepted.
+
+## begin()
+``void begin(const char *label);``
+
+Start the Telnet server. New connected clients will be greeted with the label ("Bridge-Test" in the example below) and some additional data:
+```
+Welcome to 'Bridge-Test'!
+Millis since start: 19274
+Free Heap RAM: 251448
+Server IP: 192.168.178.74
+----------------------------------------------------------------
+```
+
+### end()
+``void end();``
+
+Stops the Telnet server. Existing connections will be closed.
+
+### update()
+``void update();``
+
+This needs to be called frequently, as it is maintaining the list of connected clients. New clients are accepted, closed connections are cleaned up.
+
+### isActive()
+``bool isActive();``
+
+This call returns ``true`` if at least one client connection is currently open, and ``false`` else.
