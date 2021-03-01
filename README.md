@@ -166,7 +166,7 @@ Get number of elements currently in buffer.
 Due to the nature of the rolling buffer, this size is VOLATILE and needs to be read again every time the buffer is used! Else data may be missed.
 
 ### data()
-``const uint8_t *data();``
+``const typename *data();``
 
 Get start address of the elements in buffer.
 Due to the nature of the rolling buffer, this address is VOLATILE and needs to be read again every time the buffer is used! Else old data may be read.
