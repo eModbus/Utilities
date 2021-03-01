@@ -10,7 +10,7 @@
 #endif
 
 #if USE_MUTEX
-#include <mutex>
+#include <mutex>   // NOLINT
 using std::mutex;
 using std::lock_guard;
 #define LOCK_GUARD(x,y) std::lock_guard<std::mutex> x(y);
@@ -78,6 +78,17 @@ public:
 
   // pop: remove the leading numBytes bytes from the buffer
   size_t pop(size_t numBytes);
+
+  // operator[]: return the element the index is pointing to. If index is
+  // outside the currently used area, return 0
+  const uint8_t operator[](size_t index);
+
+  // safeCopy: get a stable data copy from currently used buffer
+  // target: buffer to copy data into
+  // len: number of bytes requested
+  // move: if true, copied bytes will be pop()-ped
+  // returns number of bytes actually transferred
+  size_t safeCopy(uint8_t *target, size_t len, bool move = false);
 
   // push_back: add a single byte or a buffer of bytes to the end of the buffer. 
   // If there is not enough room, the buffer will be rolled until the added bytes will fit.

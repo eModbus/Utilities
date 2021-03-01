@@ -77,7 +77,7 @@ RingBuf::RingBuf(RingBuf &&r) {
     end = buffer + (r.end - r.buffer);
     preserve = r.preserve;
     usable = r.usable;
-    r.setFail();
+    r.buffer = nullptr;
   } else {
     setFail();
   }
@@ -104,7 +104,7 @@ RingBuf& RingBuf::operator=(RingBuf &&r) {
       // Yes. Copy over the data
       clear();
       push_back(r.begin, r.end - r.begin);
-      r.setFail();
+      r.buffer = nullptr;
     }
   }
   return *this;
@@ -171,91 +171,118 @@ bool RingBuf::push_back(const uint8_t c) {
   if (!valid()) return false;
   {
     LOCK_GUARD(cLock, m);
-    // Are we below the capacity?
-    if (capacity()) {
-      // Yes. Just add the byte
-      *end = c;
-      // Is end pointing to the second half?
-      if (end >= (buffer + usable)) {
-        // Yes. Add the byte to the lower half as well
-        *(end - usable) = c;
-      } else {
-        // No, we need to add it to the upper half
-        *(end + usable) = c;
+    // No more space?
+    if (capacity() == 0) {
+      // No, we need to drop something
+      // Are we to keep the oldest data?
+      if (preserve) {
+        // Yes. The new byte will be dropped to leave the buffer untouched
+        return false;
       }
-      end++;
-      return true;
-    } 
-    // No, we need to drop something
-    // Are we to keep the oldest data?
-    if (preserve) {
-      // Yes. The new byte will be dropped to leave the buffer untouched
-      return false;
+      // We need to drop the oldest byte begin is pointing to
+      begin++;
+      // Overflow?
+      if (begin >= (buffer + usable)) {
+        begin = buffer;
+        end = begin + usable - 1;
+      }
     }
-    // We need to drop the oldest byte begin is pointing to
-    begin++;
-    // Overflow?
-    if (begin >= (buffer + usable)) {
-      begin = buffer;
-      end = begin + usable - 1;
+    // Now add the byte
+    *end = c;
+    // Is end pointing to the second half?
+    if (end >= (buffer + usable)) {
+      // Yes. Add the byte to the lower half as well
+      *(end - usable) = c;
+    } else {
+      // No, we need to add it to the upper half
+      *(end + usable) = c;
     }
+    end++;
   }
-  // Recursively call ourselves
-  return push_back(c);
+  return true;
 }
 
 // push_back(byte buffer): add a batch of bytes to the buffer
 bool RingBuf::push_back(const uint8_t *data, size_t size) {
   if (!valid()) return false;
+  // Do not process nullptr or zero lengths
+  if (!data || size == 0) return false;
   // Avoid self-referencing pushes
   if (data >= buffer && data <= (buffer + len)) return false;
   {
     LOCK_GUARD(cLock, m);
     // Is the size to be added fitting the capacity?
-    if (size <= capacity()) {
-      // Yes. copy it in
-      memcpy(end, data, size);
-      if (end >= (buffer + usable)) {
-        memcpy(end - usable, data, size);
-      } else {
-        // Special case: end + usable + size could be more than buffer + len can take.
-        // In this case we will have to split the data to have the overlap copied to
-        // the start of buffer!
-        if ((end + usable + size) <= (buffer + len)) {
-          // All fine, it still fits
-          memcpy(end + usable, data, size);
-        } else {
-          // Does not fit completely, we need to do a split copy
-          // First part up to buffer + len
-          uint16_t firstPart = len - (end - buffer + usable);
-          memcpy(end + usable, data, firstPart);
-          // Second part (remainder) 
-          memcpy(buffer, data + firstPart, size - firstPart);
-        }
+    if (size > capacity()) {
+      // No. We need to make room first
+      // Are we allowed to do that?
+      if (preserve) {
+        // No. deny the push_back
+        return false;
       }
-      end += size;
-      return true;
+      // Adjust data to the maximum usable size
+      if (size > usable) {
+        data += (size - usable);
+        size = usable;
+      }
+      // Make room for the data
+      begin += size - capacity();
+      if (begin >= (buffer + usable)) {
+        begin -= usable;
+        end -= usable;
+      }
     }
-    // No, we need more room, discarding older bytes for it.
-    // Are we allowed to do that?
-    if (preserve) {
-      // No. deny the push_back
-      return false;
+    // Yes. copy it in
+    memcpy(end, data, size);
+    // Also copy to the other half. Are we in the upper?
+    if (end >= (buffer + usable)) {
+      // Yes, simply copy it into the lower
+      memcpy(end - usable, data, size);
+    } else {
+      // Special case: end + usable + size could be more than buffer + len can take.
+      // In this case we will have to split the data to have the overlap copied to
+      // the start of buffer!
+      if ((end + usable + size) <= (buffer + len)) {
+        // All fine, it still fits
+        memcpy(end + usable, data, size);
+      } else {
+        // Does not fit completely, we need to do a split copy
+        // First part up to buffer + len
+        uint16_t firstPart = len - (end - buffer + usable);
+        memcpy(end + usable, data, firstPart);
+        // Second part (remainder) 
+        memcpy(buffer, data + firstPart, size - firstPart);
+      }
     }
-    // Adjust data to the maximum usable size
-    if (size > usable) {
-      data += (size - usable);
-      size = usable;
-    }
-    // Make room for the data
-    begin += size;
-    if (begin >= (buffer + usable)) {
-      begin -= usable;
-      end -= usable;
-    }
+    end += size;
   }
-  // Recursively call ourselves
-  return push_back(data, size);
+  return true;
+}
+
+// operator[]: return the element the index is pointing to. If index is
+// outside the currently used area, return 0
+const uint8_t RingBuf::operator[](size_t index) {
+  if (!valid()) return 0;
+  if (index >= 0 && index < size()) {
+    return *(begin + index);
+  }
+  return 0;
+}
+
+// safeCopy: get a stable data copy from currently used buffer
+// target: buffer to copy data into
+// len: number of bytes requested
+// move: if true, copied bytes will be pop()-ped
+// returns number of bytes actually transferred
+size_t RingBuf::safeCopy(uint8_t *target, size_t len, bool move) {
+  if (!valid()) return 0;
+  if (!target) return 0;
+  {
+    LOCK_GUARD(cLock, m);
+    if (len > size()) len = size();
+    memcpy(target, begin, len);
+  }
+  if (move) pop(len);
+  return len;
 }
 
 // Equality: sizes and contents must be identical
