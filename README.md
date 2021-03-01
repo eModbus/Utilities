@@ -170,7 +170,7 @@ Returns true if no bytes are in the buffer.
 ``bool valid();``
 ``operator bool();``
 
-``valid`` returns true if a buffer was icorrectly allocated and is usable.
+``valid`` returns true if a buffer was correctly allocated and is usable.
 Using a ``RingBuf`` object in bool context returns the same information.
 
 ### capacity()
