@@ -101,6 +101,7 @@ public:
   // Equality comparison: are sizes and contents of two buffers identical?
   bool operator==(RingBuf &r);
 
+  // Iterator: simple forward-only iterator over the visible elements of the buffer
   struct Iterator 
   {
     using iterator_category = std::forward_iterator_tag;
@@ -120,10 +121,11 @@ public:
 
     private:
       pointer m_ptr;
-    };
+  };
 
-    Iterator begin() { return Iterator(RB_begin); }
-    Iterator end()   { return Iterator(RB_end); }
+  // Provide begin() and end()
+  Iterator begin() { return Iterator(RB_begin); }
+  Iterator end()   { return Iterator(RB_end); }
 
   // bufferAdr: return the start address of the underlying, double-sized data buffer.
   // bufferSize: return the real length of the underlying data buffer.
