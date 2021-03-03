@@ -123,7 +123,15 @@ This needs to be called frequently, as it is maintaining the list of connected c
 This call returns ``true`` if at least one client connection is currently open, and ``false`` else.
 
 ## RingBuf
-``RingBuf`` is the implementation of a ``uint8_t``-type circular buffer. 
+``RingBuf`` is the implementation of a circular buffer for atomic data types (those with a fixed, known sizeof()). 
+
+Example, defining a circular buffer for up to 20 ``int`` values named ``intBuffer``:
+```
+#include "RingBuf.h"
+
+RingBuf<int> intBuffer(20);
+```
+
 For speed and convenience reasons the internal buffer is **twice** the size of the requested buffer, so please be sure to have an eye on your remaining memory.
 The interface loosely follows that of ``std::vector``, but has some additions and omissions.
 ``RingBuf`` is supporting the Move&& variants for copy constructors and assignments.
@@ -134,12 +142,14 @@ The buffer may be different in the next milliseconds.
 So **NEVER** copy the address or size into any local variable to use it, but **ALWAYS** use the ``data()``, ``size()``, ``capacity()`` etc. calls!
 
 ### Constructor
-``RingBuf(size_t size = 256, bool preserve = false);``
+``RingBuf<typename>(size_t size = 256, bool preserve = false);``
 
 The constructor takes the required usable size (remember the internal buffer is **twice** this size!) as first argument.
 The second argument controls the strategy to handle a completely filled buffer.
 If set to ``true``, a full buffer will not accept any further data unless some is removed before (with ``pop()``), hence preserving the oldest data.
 The opposite (``false``) is the default and will discard the oldest data to make room for the new.
+
+``typename`` must be an atomic type, like ``float``, ``uint8_t`` or the like.
 
 If the buffer allocation will fail, the ``RingBuf`` object will point to the const ``RingBuf::nilBuf`` buffer and will not be usable at all.
 
@@ -152,19 +162,19 @@ If the recipient's buffer is too small to hold all data from the source, only th
 ### size()
 ``size_t size();``
 
-Get number of bytes currently in buffer. 
+Get number of elements currently in buffer. 
 Due to the nature of the rolling buffer, this size is VOLATILE and needs to be read again every time the buffer is used! Else data may be missed.
 
 ### data()
-``const uint8_t *data();``
+``const typename *data();``
 
-Get start address of the bytes in buffer.
+Get start address of the elements in buffer.
 Due to the nature of the rolling buffer, this address is VOLATILE and needs to be read again every time the buffer is used! Else old data may be read.
-A read usually will be done like ``memcpy(target, ringbuf.data(), ringbuf.size());`` to not spend too much time between reading the start address and buffer size and the read proper.
+A read usually will be done like ``memcpy(target, ringbuf.data(), ringbuf.size() * sizeof(typename));`` to not spend too much time between reading the start address and buffer size and the read proper.
 
 ### empty()
 ``bool empty();``
-Returns true if no bytes are in the buffer.
+Returns true if no elements are in the buffer.
 
 ### valid()
 ``bool valid();``
@@ -176,7 +186,7 @@ Using a ``RingBuf`` object in bool context returns the same information.
 ### capacity()
 ``size_t capacity();``
 
-This function returns the number of currently unused bytes in buffer.
+This function returns the number of currently unused elements in buffer.
 Due to the nature of the rolling buffer, this size is VOLATILE and needs to be read again every time the buffer is used! Else data may be missed.
 
 ### clear()
@@ -185,26 +195,26 @@ Due to the nature of the rolling buffer, this size is VOLATILE and needs to be r
 This call is used to completely empty the buffer. Afterwards, the size will be 0.
 
 ### pop()
-``size_t pop(size_t numBytes);``
+``size_t pop(size_t numElements);``
 
 The buffer will keep its contents until one of the following is happening:
 - newer data is put in, forcing out older data if necessary
 - ``clear()`` is called to empty the buffer
-- the leading ``numBytes`` bytes are removed from the buffer with this ``pop()`` call.
+- the leading ``numElements`` bytes are removed from the buffer with this ``pop()`` call.
 
 Normally, a decently sized, flowing buffer will fill at the end, while being read from the front.
-After a read the reading application will remove the read bytes with a ``pop()`` to not read it again.
+After a read the reading application will remove the read elements with a ``pop()`` to not read it again.
 
 **Note:** as there are some milliseconds between a read (using ``data()`` and a size) and a subsequent ``pop()``, the buffer may have been changed in the meantime already.
-So the ``pop()`` may remove bytes not yet read, if the buffer is too small and/or rolling quickly!
+So the ``pop()`` may remove elements not yet read, if the buffer is too small and/or rolling quickly!
 
 ### operator[]
-``const uint8_t operator[](size_t index);``
+``const typename operator[](size_t index);``
 
-An expression like ``ringbuffer[i]`` will return the ``i``th byte of the current buffer. If there is no element number ``i``, a zero will be returned.
+An expression like ``ringbuffer[i]`` will return the ``i``th element of the current buffer. If there is no element number ``i``, a zero will be returned.
 
 ### safeCopy()
-``size_t safeCopy(uint8_t *target, size_t len, bool move = false);``
+``size_t safeCopy(typename *target, size_t len, bool move = false);``
 
 ``safeCopy`` is the only way to get a stable data copy from the currently used buffer, as it blocks all modifications until the copy has been made.
 This has consequences, though:
@@ -212,17 +222,17 @@ This has consequences, though:
 - other tasks trying to update the buffer will be held
 
 ``target`` gives the start address of the buffer to copy into.
-``len`` is the number of bytes requested. If the actual size is below the given ``len``, less bytes will be copied.
-``move``, when given and set to ``true``, will do a ``pop()`` of the copied bytes afterwards.
-The function will return the number of bytes actually copied.
+``len`` is the number of elements requested. If the actual size is below the given ``len``, less elements will be copied.
+``move``, when given and set to ``true``, will do a ``pop()`` of the copied elements afterwards.
+The function will return the number of elements actually copied.
 
 ### push_back()
-``bool push_back(const uint8_t c);``
-``bool push_back(const uint8_t *data, size_t size);``
+``bool push_back(const typename c);``
+``bool push_back(const typename *data, size_t size);``
 
 ``push_back`` is used to add data to the buffer. 
-While the first variant will append a single byte to the buffer, the second will add a block of data.
-If the data provided is larger than the buffer can fit, only the last bytes will be left in the buffer, discarding all preceeding.
+While the first variant will append a single element to the buffer, the second will add a block of data.
+If the data provided is larger than the buffer can fit, only the last elements will be left in the buffer, discarding all preceeding.
 
 ### Comparison (equality)
 ``bool operator==(RingBuf &r);``
