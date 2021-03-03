@@ -213,6 +213,11 @@ So the ``pop()`` may remove elements not yet read, if the buffer is too small an
 
 An expression like ``ringbuffer[i]`` will return the ``i``th element of the current buffer. If there is no element number ``i``, a zero will be returned.
 
+### Iterator
+``RingBuf`` is supporting a simple forward iterator, so ``begin()``, ``end()`` and range for loops are available.
+Please note, though, that accessing the data by iterator may also be affected by another task modifying the data at the same time.
+The iterator is no ``const_iterator``, so modifying the data is possible, but not advisable.
+
 ### safeCopy()
 ``size_t safeCopy(typename *target, size_t len, bool move = false);``
 
