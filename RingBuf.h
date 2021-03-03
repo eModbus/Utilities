@@ -19,6 +19,7 @@ using std::lock_guard;
 #endif
 
 #include <Arduino.h>
+#include <iterator>
 
 // RingBuf implements a circular buffer of chosen size.
 // For speed and usability reasons the internal buffer is twice the size of the requested!
@@ -90,7 +91,7 @@ public:
   // len: number of elements requested
   // move: if true, copied elements will be pop()-ped
   // returns number of elements actually transferred
-  size_t safeCopy(T *target, size_t len, bool move = false);
+  size_t safeCopy(T *target, size_t tLen, bool move = false);
 
   // push_back: add a single element or a buffer of elements to the end of the buffer. 
   // If there is not enough room, the buffer will be rolled until the added elements will fit.
@@ -100,20 +101,44 @@ public:
   // Equality comparison: are sizes and contents of two buffers identical?
   bool operator==(RingBuf &r);
 
+  struct Iterator 
+  {
+    using iterator_category = std::forward_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+    using value_type        = T;
+    using pointer           = T*;
+    using reference         = T&;
+
+    explicit Iterator(pointer ptr) : m_ptr(ptr) {}
+
+    reference operator*() const { return *m_ptr; }
+    pointer operator->() { return m_ptr; }
+    Iterator& operator++() { m_ptr++; return *this; }  
+    Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+    friend bool operator== (const Iterator& a, const Iterator& b) { return a.m_ptr == b.m_ptr; };
+    friend bool operator!= (const Iterator& a, const Iterator& b) { return a.m_ptr != b.m_ptr; };  
+
+    private:
+      pointer m_ptr;
+    };
+
+    Iterator begin() { return Iterator(RB_begin); }
+    Iterator end()   { return Iterator(RB_end); }
+
   // bufferAdr: return the start address of the underlying, double-sized data buffer.
   // bufferSize: return the real length of the underlying data buffer.
   // Note that this is only sensible in a debug context!
-  inline const uint8_t *bufferAdr() { return (uint8_t *)buffer; }
-  inline const size_t bufferSize() { return len * elementSize; }
+  inline const uint8_t *bufferAdr() { return (uint8_t *)RB_buffer; }
+  inline const size_t bufferSize() { return RB_len * RB_elementSize; }
 
 protected:
-  T *buffer;           // The data buffer proper (twice the requested size)
-  T *begin;            // Pointer to the first element currently used
-  T *end;              // Pointer behind the last element currently used
-  size_t len;                // Real length of buffer (twice the requested size)
-  size_t usable;             // Requested length of the buffer
-  bool preserve;             // Flag to hold or discard the oldest elements if elements are added
-  size_t elementSize;        // Size of a single buffer element
+  T *RB_buffer;           // The data buffer proper (twice the requested size)
+  T *RB_begin;            // Pointer to the first element currently used
+  T *RB_end;              // Pointer behind the last element currently used
+  size_t RB_len;                // Real length of buffer (twice the requested size)
+  size_t RB_usable;             // Requested length of the buffer
+  bool RB_preserve;             // Flag to hold or discard the oldest elements if elements are added
+  size_t RB_elementSize;        // Size of a single buffer element
 #if USE_MUTEX
   std::mutex m;              // Mutex to protect pop, clear and push_back operations
 #endif
@@ -126,16 +151,16 @@ const T  RingBuf<T>::nilBuf[2] = { 0, 0 };
 // setFail: in case of memory allocation problems, use static nilBuf 
 template <typename T>
 void RingBuf<T>::setFail() {
-  buffer = (T *)RingBuf<T>::nilBuf;
-  len = 2 * elementSize;
-  usable = 0;
-  begin = end = buffer;
+  RB_buffer = (T *)RingBuf<T>::nilBuf;
+  RB_len = 2 * RB_elementSize;
+  RB_usable = 0;
+  RB_begin = RB_end = RB_buffer;
 }
 
 // valid: return if buffer is a real one
 template <typename T>
 bool RingBuf<T>::valid() {
-  return (buffer && (buffer != RingBuf<T>::nilBuf));
+  return (RB_buffer && (RB_buffer != RingBuf<T>::nilBuf));
 }
 
 // operator bool: same as valid()
@@ -147,14 +172,14 @@ RingBuf<T>::operator bool() {
 // Constructor: allocate a buffer twice the requested size
 template <typename T>
 RingBuf<T>::RingBuf(size_t size, bool p) :
-  len(size * 2),
-  usable(size),
-  preserve(p),
-  elementSize(sizeof(T)) {
+  RB_len(size * 2),
+  RB_usable(size),
+  RB_preserve(p),
+  RB_elementSize(sizeof(T)) {
   // Allocate memory
-  buffer = new T[len];
+  RB_buffer = new T[RB_len];
   // Failed?
-  if (!buffer) setFail();
+  if (!RB_buffer) setFail();
   else clear();
 }
 
@@ -164,7 +189,7 @@ RingBuf<T>::~RingBuf() {
   // Do we have a valid buffer?
   if (valid()) {
     // Yes, free it
-    delete buffer;
+    delete RB_buffer;
   }
 }
 
@@ -172,19 +197,19 @@ RingBuf<T>::~RingBuf() {
 template <typename T>
 RingBuf<T>::RingBuf(const RingBuf &r) {
   // Is the assigned RingBuf valid?
-  if (r.buffer && (r.buffer != RingBuf<T>::nilBuf)) {
+  if (r.RB_buffer && (r.RB_buffer != RingBuf<T>::nilBuf)) {
     // Yes. Try to allocate a copy
-    buffer = new T[r.len];
+    RB_buffer = new T[r.RB_len];
     // Succeeded?
-    if (buffer) {
+    if (RB_buffer) {
       // Yes. copy over data
-      len = r.len;
-      memcpy(buffer, r.buffer, len * r.elementSize);
-      begin = buffer + (r.begin - r.buffer);
-      end = buffer + (r.end - r.buffer);
-      preserve = r.preserve;
-      usable = r.usable;
-      elementSize = r.elementSize;
+      RB_len = r.RB_len;
+      memcpy(RB_buffer, r.RB_buffer, RB_len * r.RB_elementSize);
+      RB_begin = RB_buffer + (r.RB_begin - r.RB_buffer);
+      RB_end = RB_buffer + (r.RB_end - r.RB_buffer);
+      RB_preserve = r.RB_preserve;
+      RB_usable = r.RB_usable;
+      RB_elementSize = r.RB_elementSize;
     } else {
       setFail();
     }
@@ -197,16 +222,16 @@ RingBuf<T>::RingBuf(const RingBuf &r) {
 template <typename T>
 RingBuf<T>::RingBuf(RingBuf &&r) {
   // Is the assigned RingBuf valid?
-  if (r.buffer && (r.buffer != RingBuf<T>::nilBuf)) {
+  if (r.RB_buffer && (r.RB_buffer != RingBuf<T>::nilBuf)) {
     // Yes. Take over the data
-    buffer = r.buffer;
-    len = r.len;
-    begin = buffer + (r.begin - r.buffer);
-    end = buffer + (r.end - r.buffer);
-    preserve = r.preserve;
-    usable = r.usable;
-    elementSize = r.elementSize;
-    r.buffer = nullptr;
+    RB_buffer = r.RB_buffer;
+    RB_len = r.RB_len;
+    RB_begin = RB_buffer + (r.RB_begin - r.RB_buffer);
+    RB_end = RB_buffer + (r.RB_end - r.RB_buffer);
+    RB_preserve = r.RB_preserve;
+    RB_usable = r.RB_usable;
+    RB_elementSize = r.RB_elementSize;
+    r.RB_buffer = nullptr;
   } else {
     setFail();
   }
@@ -217,10 +242,10 @@ template <typename T>
 RingBuf<T>& RingBuf<T>::operator=(const RingBuf<T> &r) {
   if (valid()) {
     // Is the source a real RingBuf?
-    if (r.buffer && (r.buffer != RingBuf<T>::nilBuf)) {
+    if (r.RB_buffer && (r.RB_buffer != RingBuf<T>::nilBuf)) {
       // Yes. Copy over the data
       clear();
-      push_back(r.begin, r.end - r.begin);
+      push_back(r.RB_begin, r.RB_end - r.RB_begin);
     }
   }
   return *this;
@@ -231,11 +256,11 @@ template <typename T>
 RingBuf<T>& RingBuf<T>::operator=(RingBuf<T> &&r) {
   if (valid()) {
     // Is the source a real RingBuf?
-    if (r.buffer && (r.buffer != RingBuf<T>::nilBuf)) {
+    if (r.RB_buffer && (r.RB_buffer != RingBuf<T>::nilBuf)) {
       // Yes. Copy over the data
       clear();
-      push_back(r.begin, r.end - r.begin);
-      r.buffer = nullptr;
+      push_back(r.RB_begin, r.RB_end - r.RB_begin);
+      r.RB_buffer = nullptr;
     }
   }
   return *this;
@@ -244,13 +269,13 @@ RingBuf<T>& RingBuf<T>::operator=(RingBuf<T> &&r) {
 // size: number of elements used in the buffer
 template <typename T>
 size_t RingBuf<T>::size() {
-  return end - begin;
+  return RB_end - RB_begin;
 }
 
 // data: get start of used data area
 template <typename T>
 const T *RingBuf<T>::data() {
-  return begin;
+  return RB_begin;
 }
 
 // empty: is any data in buffer?
@@ -263,7 +288,7 @@ bool RingBuf<T>::empty() {
 template <typename T>
 size_t RingBuf<T>::capacity() {
   if (!valid()) return 0;
-  return usable - size();
+  return RB_usable - size();
 }
 
 // clear: forget about contents
@@ -271,7 +296,7 @@ template <typename T>
 bool RingBuf<T>::clear() {
   if (!valid()) return false;
   LOCK_GUARD(cLock, m);
-  begin = end = buffer;
+  RB_begin = RB_end = RB_buffer;
   return true;
 }
 
@@ -290,12 +315,12 @@ size_t RingBuf<T>::pop(size_t numElements) {
     } else {
       LOCK_GUARD(cLock, m);
       // No, the buffer needs to be emptied partly only
-      begin += numElements;
+      RB_begin += numElements;
       // Is begin now pointing into the upper half?
-      if (begin >= (buffer + usable)) {
+      if (RB_begin >= (RB_buffer + RB_usable)) {
         // Yes. Move begin and end down again
-        begin -= usable;
-        end -= usable;
+        RB_begin -= RB_usable;
+        RB_end -= RB_usable;
       }
     }
     return numElements;
@@ -313,29 +338,29 @@ bool RingBuf<T>::push_back(const T c) {
     if (capacity() == 0) {
       // No, we need to drop something
       // Are we to keep the oldest data?
-      if (preserve) {
+      if (RB_preserve) {
         // Yes. The new element will be dropped to leave the buffer untouched
         return false;
       }
       // We need to drop the oldest element begin is pointing to
-      begin++;
+      RB_begin++;
       // Overflow?
-      if (begin >= (buffer + usable)) {
-        begin = buffer;
-        end = begin + usable - 1;
+      if (RB_begin >= (RB_buffer + RB_usable)) {
+        RB_begin = RB_buffer;
+        RB_end = RB_begin + RB_usable - 1;
       }
     }
     // Now add the element
-    *end = c;
+    *RB_end = c;
     // Is end pointing to the second half?
-    if (end >= (buffer + usable)) {
+    if (RB_end >= (RB_buffer + RB_usable)) {
       // Yes. Add the element to the lower half as well
-      *(end - usable) = c;
+      *(RB_end - RB_usable) = c;
     } else {
       // No, we need to add it to the upper half
-      *(end + usable) = c;
+      *(RB_end + RB_usable) = c;
     }
-    end++;
+    RB_end++;
   }
   return true;
 }
@@ -347,52 +372,52 @@ bool RingBuf<T>::push_back(const T *data, size_t size) {
   // Do not process nullptr or zero lengths
   if (!data || size == 0) return false;
   // Avoid self-referencing pushes
-  if (data >= buffer && data <= (buffer + len)) return false;
+  if (data >= RB_buffer && data <= (RB_buffer + RB_len)) return false;
   {
     LOCK_GUARD(cLock, m);
     // Is the size to be added fitting the capacity?
     if (size > capacity()) {
       // No. We need to make room first
       // Are we allowed to do that?
-      if (preserve) {
+      if (RB_preserve) {
         // No. deny the push_back
         return false;
       }
       // Adjust data to the maximum usable size
-      if (size > usable) {
-        data += (size - usable);
-        size = usable;
+      if (size > RB_usable) {
+        data += (size - RB_usable);
+        size = RB_usable;
       }
       // Make room for the data
-      begin += size - capacity();
-      if (begin >= (buffer + usable)) {
-        begin -= usable;
-        end -= usable;
+      RB_begin += size - capacity();
+      if (RB_begin >= (RB_buffer + RB_usable)) {
+        RB_begin -= RB_usable;
+        RB_end -= RB_usable;
       }
     }
     // Yes. copy it in
-    memcpy(end, data, size * elementSize);
+    memcpy(RB_end, data, size * RB_elementSize);
     // Also copy to the other half. Are we in the upper?
-    if (end >= (buffer + usable)) {
+    if (RB_end >= (RB_buffer + RB_usable)) {
       // Yes, simply copy it into the lower
-      memcpy(end - usable, data, size * elementSize);
+      memcpy(RB_end - RB_usable, data, size * RB_elementSize);
     } else {
       // Special case: end + usable + size could be more than buffer + len can take.
       // In this case we will have to split the data to have the overlap copied to
       // the start of buffer!
-      if ((end + usable + size) <= (buffer + len)) {
+      if ((RB_end + RB_usable + size) <= (RB_buffer + RB_len)) {
         // All fine, it still fits
-        memcpy(end + usable, data, size * elementSize);
+        memcpy(RB_end + RB_usable, data, size * RB_elementSize);
       } else {
         // Does not fit completely, we need to do a split copy
         // First part up to buffer + len
-        uint16_t firstPart = len - (end - buffer + usable);
-        memcpy(end + usable, data, firstPart * elementSize);
+        uint16_t firstPart = RB_len - (RB_end - RB_buffer + RB_usable);
+        memcpy(RB_end + RB_usable, data, firstPart * RB_elementSize);
         // Second part (remainder) 
-        memcpy(buffer, data + firstPart, (size - firstPart) * elementSize);
+        memcpy(RB_buffer, data + firstPart, (size - firstPart) * RB_elementSize);
       }
     }
-    end += size;
+    RB_end += size;
   }
   return true;
 }
@@ -403,7 +428,7 @@ template <typename T>
 const T RingBuf<T>::operator[](size_t index) {
   if (!valid()) return 0;
   if (index >= 0 && index < size()) {
-    return *(begin + index);
+    return *(RB_begin + index);
   }
   return 0;
 }
@@ -414,16 +439,16 @@ const T RingBuf<T>::operator[](size_t index) {
 // move: if true, copied elements will be pop()-ped
 // returns number of elements actually transferred
 template <typename T>
-size_t RingBuf<T>::safeCopy(T *target, size_t len, bool move) {
+size_t RingBuf<T>::safeCopy(T *target, size_t tLen, bool move) {
   if (!valid()) return 0;
   if (!target) return 0;
   {
     LOCK_GUARD(cLock, m);
-    if (len > size()) len = size();
-    memcpy(target, begin, len * elementSize);
+    if (tLen > size()) tLen = size();
+    memcpy(target, RB_begin, tLen * RB_elementSize);
   }
-  if (move) pop(len);
-  return len;
+  if (move) pop(tLen);
+  return tLen;
 }
 
 // Equality: sizes and contents must be identical
@@ -431,7 +456,7 @@ template <typename T>
 bool RingBuf<T>::operator==(RingBuf<T> &r) {
   if (!valid() || !r.valid()) return false;
   if (size() != r.size()) return false;
-  if (memcmp(begin, r.begin, size() * elementSize)) return false;
+  if (memcmp(RB_begin, r.RB_begin, size() * RB_elementSize)) return false;
   return true;
 }
 #endif
