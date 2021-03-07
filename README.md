@@ -84,10 +84,13 @@ If the time is exceeded, a single click is assumed.
  
  Get the number of events currently held in queue.
 
-## TelnetLog
+## TelnetLog and TelnetLogAsync
 A class to duplicate output to all connected Telnet clients (i.e. do logging over Telnet). 
 As ``TelnetLog`` is derived from ``Print``, all well-known print and write functions are supported.
 Instead of the notorious ``Serial.print()`` calls, ``TelnetLog`` functions may be used in the same manner.
+
+TelnetLogAsync is using the ESPAsyncTCP library by me-no-dev, which is especially well-suited to be used on ESP8266 MCUs.
+The Async variety is requiring the ``RingBuf`` tool internally (see below). Please note that this means additional memory consumption.
 
 ### Constructor
 ``TelnetLog(uint16_t port, uint8_t maxClients);``
@@ -115,7 +118,8 @@ Stops the Telnet server. Existing connections will be closed.
 ### update()
 ``void update();``
 
-This needs to be called frequently, as it is maintaining the list of connected clients. New clients are accepted, closed connections are cleaned up.
+Non-Async only: this needs to be called frequently, as it is maintaining the list of connected clients. New clients are accepted, closed connections are cleaned up.
+The Async version does not require this call but does poll internally.
 
 ### isActive()
 ``bool isActive();``
