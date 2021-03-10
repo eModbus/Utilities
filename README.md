@@ -1,6 +1,10 @@
 # Utilities
 
 A collection of utility classes I wrote for myself.
+- [Blinker](#blinker): maintain arbitrary blink patterns on LEDs
+- [Buttoner](#buttoner): watch push buttons for clicks, double clicks and long presses
+- [TelnetLog, -Async](#telnetlog-and-telnetlogasync): Telnet server to distribute (log) output to remote clients
+- [RingBuf](#ringbuf): maintain a circular buffer of any type and size
 
 ## Blinker
 A class to maintain arbitrary blinking patterns for LEDs.
@@ -98,6 +102,11 @@ The Async variety is requiring the ``RingBuf`` tool internally (see below). Plea
 ``port`` usually will be 23 for Telnet, but may be chosen freely.
 ``maxClients`` sets the maximum number of concurrent client connections accepted.
 
+The async variety has a third, optional parameter to the constructor:
+``size_t RBsize`` gives the size in characters the internal ``RingBuf`` shall maintain. 
+**Note**: the ``RBsize`` is limiting the number of output characters sent to the clients.
+If your internal logic is sending more than ``RBsize`` characters as output in a row, only the last ``RBsize`` characters will be seen on the clints' side!
+
 ## begin()
 ``void begin(const char *label);``
 
@@ -136,19 +145,18 @@ Example, defining a circular buffer for up to 20 ``int`` values named ``intBuffe
 RingBuf<int> intBuffer(20);
 ```
 
-For speed and convenience reasons the internal buffer is **twice** the size of the requested buffer, so please be sure to have an eye on your remaining memory.
 The interface loosely follows that of ``std::vector``, but has some additions and omissions.
 ``RingBuf`` is supporting the Move&& variants for copy constructors and assignments.
 
 **Note:** Due to the nature of the "rolling" buffer, the data in it may be highly volatile. 
 Any function to get the data from the buffer will only have a snapshot at the time the access is made.
 The buffer may be different in the next milliseconds.
-So **NEVER** copy the address or size into any local variable to use it, but **ALWAYS** use the ``data()``, ``size()``, ``capacity()`` etc. calls!
+So **NEVER** copy the size or remaining capacity into any local variable to use it, but **ALWAYS** use the ``size()``, ``capacity()`` etc. calls!
 
 ### Constructor
 ``RingBuf<typename>(size_t size = 256, bool preserve = false);``
 
-The constructor takes the required usable size (remember the internal buffer is **twice** this size!) as first argument.
+The constructor takes the required usable size as first argument.
 The second argument controls the strategy to handle a completely filled buffer.
 If set to ``true``, a full buffer will not accept any further data unless some is removed before (with ``pop()``), hence preserving the oldest data.
 The opposite (``false``) is the default and will discard the oldest data to make room for the new.
@@ -173,7 +181,6 @@ Due to the nature of the rolling buffer, this size is VOLATILE and needs to be r
 ``const typename *data();``
 
 Get start address of the elements in buffer.
-Due to the nature of the rolling buffer, this address is VOLATILE and needs to be read again every time the buffer is used! Else old data may be read.
 A read usually will be done like ``memcpy(target, ringbuf.data(), ringbuf.size() * sizeof(typename));`` to not spend too much time between reading the start address and buffer size and the read proper.
 
 ### empty()
@@ -228,7 +235,7 @@ The iterator is no ``const_iterator``, so modifying the data is possible, but no
 ``safeCopy`` is the only way to get a stable data copy from the currently used buffer, as it blocks all modifications until the copy has been made.
 This has consequences, though:
 - you will need another target buffer to copy the data into - using additional memory.
-- other tasks trying to update the buffer will be held
+- other tasks trying to update the buffer will be held on the ESP32 and the output may be lost on the ESP8266
 
 ``target`` gives the start address of the buffer to copy into.
 ``len`` is the number of elements requested. If the actual size is below the given ``len``, less elements will be copied.
