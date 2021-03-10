@@ -7,7 +7,7 @@
 #include <Wire.h>
 #include "SSD1306Ascii.h"
 #include "SSD1306AsciiWire.h"
-#include "TelnetLog.h"
+#include "TelnetLogAsync.h"
 #include "Logging.h"
 
 // 0X3C+SA0 - 0x3C or 0x3D
@@ -71,17 +71,22 @@ void setup() {
   oled.clear();
   oled.setFont(System5x7);
   tl.begin("Bridge-Test");
-  LOGDEVICE = &tl;
+  // LOGDEVICE = &tl;
   MBUlogLvl = LOG_LEVEL_VERBOSE;
 }
 
 void loop() {
   static uint32_t dTimer = millis();
   static bool dOn = false;
+  static unsigned int oldClientNum = 999;
   char buffer[64];
   rot.update();
   gruen.update();
-  tl.update();
+
+  if (oldClientNum != tl.getActiveClients()) {
+    oldClientNum = tl.getActiveClients();
+    Serial.printf("%d clients.\n", oldClientNum);
+  }
 
   if (ButtonA.update() > 0) {
     if (!dOn) oled.ssd1306WriteCmd(SSD1306_DISPLAYON);
