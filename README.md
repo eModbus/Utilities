@@ -105,7 +105,7 @@ The Async variety is requiring the ``RingBuf`` tool internally (see below). Plea
 The async variety has a third, optional parameter to the constructor:
 ``size_t RBsize`` gives the size in characters the internal ``RingBuf`` shall maintain. 
 **Note**: the ``RBsize`` is limiting the number of output characters sent to the clients.
-If your internal logic is sending more than ``RBsize`` characters as output in a row, only the last ``RBsize`` characters will be seen on the clints' side!
+If your internal logic is sending more than ``RBsize`` characters as output in a row, only the last ``RBsize`` characters will be seen on the clients' side!
 
 ## begin()
 ``void begin(const char *label);``
